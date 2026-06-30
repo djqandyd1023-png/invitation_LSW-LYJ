@@ -851,9 +851,6 @@
         }
 
         update() {
-            let pointer = this.input.activePointer;
-            this.coordText.setPosition(pointer.worldX + 15, pointer.worldY + 15);
-            this.coordText.setText(`(${Math.round(pointer.worldX)}, ${Math.round(pointer.worldY)})`);
 
             // 💬 대화창이 열려있는 동안은 캐릭터 이동/점프를 전부 멈춘다 (대화에만 집중)
             if (this.isChatOpen) {
