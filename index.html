@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>이승원,이유진 결혼합니다.</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        /* 💡 모바일 브라우저의 100vh는 주소창 영역까지 포함해서 계산되는 경우가 많아,
+           세로화면에서 콘텐츠가 화면 정중앙보다 아래로 밀려 보이는 원인이 되곤 합니다.
+           지원하는 브라우저에서는 100dvh(주소창 변화에 반응하는 실제 보이는 높이)를 우선 사용합니다. */
+        body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; background-color: #000; }
+        #game-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; height: 100dvh; display: flex; justify-content: center; align-items: center; z-index: 1; }
+        #portrait-warning { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #ffffff; color: #000000; display: none; justify-content: center; align-items: center; z-index: 9999; text-align: center; font-family: "Arial", sans-serif; }
+        /* 💡 세로화면이어도 무조건 뜨던 기존 미디어쿼리는 제거. 이제부터는 JS가 상황(인트로 전/후)에 맞춰 .active 클래스를 붙여줄 때만 표시됨 */
+        #portrait-warning.active { display: flex; }
+        
+        canvas {
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+        }
+
+        * {
+            cursor: url('images/click_0.png'), auto !important;
+        }
+    </style>
+</head>
+<body>
+<div id="portrait-warning"><h1>📱<br><br>화면을 가로로 돌려주세요!</h1></div>
+<div id="game-container"></div>
+
+<script>
+    // =========================================================================
+    // 📱 화면 방향 안내 제어
+    //  - 인트로(StartScene)에서는 세로화면이어도 안내를 띄우지 않는다.
+    //  - 인트로 영상을 탭해서 게임을 "시작"한 순간부터는, 세로화면일 때 회전 안내를 띄운다.
+    //  - enforceLandscapeWarning이 핵심 플래그: false면 항상 안내를 숨김, true면 세로일 때만 보임.
+    // =========================================================================
+    let enforceLandscapeWarning = false;
+
+    function updatePortraitWarning() {
+        const isPortrait = window.innerHeight > window.innerWidth;
+        const warningEl = document.getElementById('portrait-warning');
+        warningEl.classList.toggle('active', enforceLandscapeWarning && isPortrait);
+    }
+
+    window.addEventListener('resize', updatePortraitWarning);
+    window.addEventListener('orientationchange', updatePortraitWarning);
+    updatePortraitWarning(); // 최초 1회 실행 (이 시점엔 enforceLandscapeWarning=false라 항상 숨김 상태)
+
+    // 인트로 탭 시 호출: 가능하면 전체화면 + 가로 고정을 시도하고, 이후부터 회전 안내를 활성화한다.
+    //  - 가로 고정(screen.orientation.lock)은 안드로이드 Chrome 등 일부 브라우저에서만 동작하고,
+    //    iOS Safari는 지원하지 않는다(실패해도 무시하고 그냥 진행 - 그 경우 사용자가 직접 돌려야 함).
+    function enterLandscapeExperience(scaleManager) {
+        try {
+            if (!scaleManager.isFullscreen) scaleManager.startFullscreen();
+        } catch (e) {}
+
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(() => {});
+            }
+        } catch (e) {}
+
+        enforceLandscapeWarning = true;
+        updatePortraitWarning();
+    }
+
+    class StartScene extends Phaser.Scene {
+        constructor() { super({ key: 'StartScene' }); }
+        preload() {
+            for (let i = 0; i <= 20; i++) this.load.image(`invit_${i}`, `images/invit_${i}.png`);
+            this.load.image('bg_select', 'images/bg_select.png'); 
+            this.load.image('sign', 'images/sign.png'); 
+            this.load.image('title_sign', 'images/title_sign.png'); 
+            this.load.image('title', 'images/title.png'); 
+            
+            this.load.image('sound_on', 'images/sound_on.png');
+            this.load.image('sound_off', 'images/sound_off.png');
+            this.load.audio('bgm_select', 'audio/bgm_select.mp3');
+
+            this.load.image('bg_wedding_village', 'images/bg_wedding_village.png');
+            this.load.audio('bgm_wedding_village', 'audio/bgm_wedding_village.mp3');
+
+            const chars = ['man', 'woman', 'toben'];
+            chars.forEach(char => {
+                for(let z=0; z<=3; z++) this.load.image(`${char}_stand1_${z}`, `images/${char}_stand1_${z}.png`);
+                for(let z=0; z<=4; z++) this.load.image(`${char}_walk1_${z}`, `images/${char}_walk1_${z}.png`);
+                for(let z=0; z<=1; z++) this.load.image(`${char}_jump_${z}`, `images/${char}_jump_${z}.png`);
+                this.load.image(`${char}_prone`, `images/${char}_prone.png`);
+            });
+            for (let i = 0; i <= 7; i++) this.load.image(`portal_${i}`, `images/portal_${i}.png`);
+            for (let i = 1; i <= 5; i++) this.load.image(`hiden_portal_${i}`, `images/hiden_portal_${i}.png`);
+            for (let i = 0; i <= 5; i++) this.load.image(`sprite_${i}`, `images/sprite_${i}.png`);
+
+            this.load.audio('bgm_portal', 'audio/bgm_portal.mp3');
+            this.load.audio('bgm_tel', 'audio/bgm_tel.mp3');
+            this.load.audio('bgm_jump', 'audio/bgm_jump.mp3');
+            this.load.image('arrow_0', 'images/arrow_0.png');
+            this.load.image('jump_key', 'images/jump_key.png');
+            this.load.image('npc_key', 'images/npc_key.png');
+            
+            this.load.audio('bgm_ch_select', 'audio/bgm_ch_select.mp3');
+        }
+        create() {
+            this.anims.create({ key: 'invit_playing', frames: Array.from({length:21}, (_,i)=>({key:`invit_${i}`})), frameRate: 12, repeat: -1 });
+
+            // =========================================================================
+            // 📐 인트로(invit_$) 이미지의 위치(x, y)와 크기(scale)를 가로/세로 화면별로 따로 지정합니다.
+            //  - x, y는 게임 내부 좌표 기준 (가로 1280 x 세로 720 이라고 생각하면 됩니다)
+            //    · x: 0(맨 왼쪽) ~ 1280(맨 오른쪽), 640이 정중앙
+            //    · y: 0(맨 위) ~ 720(맨 아래), 360이 정중앙
+            //  - scale은 원본 이미지 크기의 배수입니다 (2 = 2배, 4 = 4배 ...)
+            //  - 나중에 위치/크기를 조절하고 싶으면 아래 숫자만 바꾸면 됩니다!
+            // =========================================================================
+            const isPortrait = window.innerHeight > window.innerWidth;
+
+            const invitLayout = isPortrait
+                ? { x: 640, y: 200, scale: 4 } // 📱 세로화면(스마트폰): 사용자 확정값 (x:640, y:200), 기존보다 2배 크게(2→4)
+                : { x: 640, y: 360, scale: 2 }; // 💻 가로화면(컴퓨터 등): 기존 그대로 유지
+
+            this.add.sprite(invitLayout.x, invitLayout.y, 'invit_0').setScale(invitLayout.scale).play('invit_playing').setInteractive().on('pointerup', () => {
+                try { enterLandscapeExperience(this.scale); } catch (e) { console.warn('전체화면/가로고정 시도 실패:', e); } // 전체화면 + 가로 고정 시도 + 이후 회전 안내 활성화
+
+                let hasTransitioned = false;
+                const goToSelect = () => {
+                    if (hasTransitioned) return;
+                    hasTransitioned = true;
+                    this.scene.start('SelectScene');
+                };
+
+                this.cameras.main.fadeOut(1000, 0, 0, 0);
+                this.cameras.main.once('camerafadeoutcomplete', goToSelect);
+
+                // 🛡️ 안전장치: 페이드 완료 이벤트가 어떤 이유로든 발생하지 않아도 1.8초 후 강제 진행
+                this.time.delayedCall(1800, goToSelect);
+            });
+        }
+    }
+
+    class SelectScene extends Phaser.Scene {
+        constructor() { super({ key: 'SelectScene' }); }
+
+        create() {
+            this.cameras.main.fadeIn(1000, 0, 0, 0);
+
+            this.selectedChar = ""; 
+            this.isSoundOn = false; 
+            
+            this.add.image(640, 360, 'bg_select').setDisplaySize(1280, 720);
+            this.add.image(125, 170, 'title_sign').setScale(0.25);
+            
+            this.anims.create({ key: 'portal_playing', frames: Array.from({length: 8}, (_, i) => ({ key: `portal_${i}` })), frameRate: 5, repeat: -1 });
+            this.add.sprite(300, 500, 'portal_0').setOrigin(0.2, 1).setScale(1.5).play('portal_playing');
+
+            this.anims.create({ key: 'spotlight_playing', frames: Array.from({length: 6}, (_, i) => ({ key: `sprite_${i}` })), frameRate: 10, repeat: -1 });
+            this.spotlight = this.add.sprite(-200, -200, 'sprite_0').setScale(2).play('spotlight_playing').setVisible(false);
+
+            this.add.image(660, 170, 'title').setScale(0.45);
+
+            let soundBtn = this.add.image(1200, 50, 'sound_off').setInteractive({ useHandCursor: true }).setScale(0.1);
+
+            // 🖥️ 수동 전체화면 전환 버튼 (사운드 버튼 옆)
+            //  - iOS Safari 등 자동 전체화면이 안 되는 기기에서 사용자가 직접 누를 수 있도록 제공합니다.
+            //  - 색: 검정(#000000), 크기: 43px (36px × 1.2배)
+            this.add.text(1100, 30, '⛶', { font: '43px Arial', fill: '#000000' })
+                .setInteractive({ useHandCursor: true })
+                .on('pointerdown', () => enterLandscapeExperience(this.scale));
+            let bgm = null;
+            if (this.cache.audio.exists('bgm_select')) {
+                bgm = this.sound.add('bgm_select', { loop: true, volume: 0.5 });
+            }
+            soundBtn.on('pointerdown', (pointer, localX, localY, event) => {
+                if (event) event.stopPropagation();
+                if (!bgm) return; 
+                if (bgm.isPlaying) {
+                    bgm.pause(); 
+                    soundBtn.setTexture('sound_off'); 
+                    this.isSoundOn = false;
+                } else {
+                    if (bgm.isPaused) { bgm.resume(); } else { bgm.play(); }
+                    soundBtn.setTexture('sound_on'); 
+                    this.isSoundOn = true;
+                }
+            });
+
+            const chars = ['man', 'woman', 'toben'];
+            chars.forEach(char => {
+                this.anims.create({ key: `${char}_breathing`, frames: [ { key: `${char}_stand1_0` }, { key: `${char}_stand1_0` }, { key: `${char}_stand1_1` }, { key: `${char}_stand1_1` }, { key: `${char}_stand1_2` }, { key: `${char}_stand1_2` }, { key: `${char}_stand1_3` }, { key: `${char}_stand1_3` } ], frameRate: 6, repeat: -1 });
+                this.anims.create({ key: `${char}_walking`, frames: [ { key: `${char}_walk1_0` }, { key: `${char}_walk1_1` }, { key: `${char}_walk1_2` }, { key: `${char}_walk1_3` }, { key: `${char}_walk1_4` } ], frameRate: 6, repeat: -1 });
+            });
+            let manBtn = this.add.sprite(500, 510, 'man_stand1_0').setOrigin(0.5, 1).setInteractive().setScale(2).play('man_breathing');
+            let womanBtn = this.add.sprite(725, 510, 'woman_stand1_0').setOrigin(0.5, 1).setInteractive().setScale(2).play('woman_breathing');
+            let tobenBtn = this.add.sprite(950, 510, 'toben_stand1_0').setOrigin(0.5, 1).setInteractive().setScale(2).play('toben_breathing');
+            
+            const selectCharacter = (targetBtn, charName) => {
+                [manBtn, womanBtn, tobenBtn].forEach(b => { b.setAlpha(0.5); b.play(b.texture.key.split('_')[0] + '_breathing'); });
+                targetBtn.setAlpha(1).play(`${charName}_walking`);
+                this.selectedChar = charName; 
+                this.spotlight.setVisible(true).setPosition(targetBtn.x, targetBtn.y - 250);
+                
+                this.sound.stopByKey('bgm_ch_select');
+                this.sound.play('bgm_ch_select'); 
+            };
+            manBtn.on('pointerdown', () => selectCharacter(manBtn, 'man'));
+            womanBtn.on('pointerdown', () => selectCharacter(womanBtn, 'woman'));
+            tobenBtn.on('pointerdown', () => selectCharacter(tobenBtn, 'toben'));
+            
+            this.add.image(1150, 305, 'sign').setScale(0.3).setInteractive().on('pointerdown', () => { 
+                if (!this.selectedChar) return;
+
+                // 🛡️ 사운드 재생 자체가 실패해도(일부 iOS Safari 환경) 다음 동작이 막히지 않도록 보호
+                try { this.sound.play('bgm_portal'); } catch (e) { console.warn('포탈 효과음 재생 실패:', e); }
+
+                // 한 번만 전환되도록 막는 플래그 (페이드 이벤트 + 안전장치 타이머가 동시에 실행되는 것 방지)
+                let hasTransitioned = false;
+
+                const goToVillage = () => {
+                    if (hasTransitioned) return;
+                    hasTransitioned = true;
+                    this.scene.start('VillageScene', { character: this.selectedChar, isSoundOn: this.isSoundOn });
+                };
+
+                const startTransition = () => {
+                    if (hasTransitioned) return;
+                    // 🛡️ 배경음(bgm) 페이드아웃 도중 어떤 이유로든(특히 iOS Safari의 Web Audio 특성) 오류가 나도
+                    //    다음 화면으로의 전환만큼은 절대 막히지 않도록 try/catch로 감싼다.
+                    try {
+                        if (bgm && bgm.isPlaying) {
+                            this.tweens.add({
+                                targets: bgm,
+                                volume: 0,
+                                duration: 500,
+                                onComplete: () => {
+                                    try { bgm.stop(); } catch (e) {}
+                                    goToVillage();
+                                }
+                            });
+                        } else {
+                            goToVillage();
+                        }
+                    } catch (e) {
+                        console.warn('배경음 정지 중 오류 발생 - 그래도 다음 화면으로 진행합니다:', e);
+                        goToVillage();
+                    }
+                };
+
+                this.cameras.main.fadeOut(1000, 0, 0, 0);
+                this.cameras.main.once('camerafadeoutcomplete', startTransition);
+
+                // 🛡️ 최종 안전장치: 페이드 완료 이벤트가 어떤 기기/브라우저에서 발생하지 않더라도,
+                //    1.8초 후엔 강제로 다음 화면으로 진행시킨다 (까만 화면에 영원히 멈추는 것 방지)
+                this.time.delayedCall(1800, startTransition);
+            });
+        }
+    }
+
+    class VillageScene extends Phaser.Scene {
+        constructor() { super({ key: 'VillageScene' }); }
+        init(data) { 
+            this.myChar = data.character; 
+            this.isSoundOn = data.isSoundOn;
+        }
+
+        preload() {
+            this.load.image('bride_fa_sit', 'images/bride_fa_sit.png');
+            this.load.image('bride_mo_sit', 'images/bride_mo_sit.png');
+            this.load.image('groom_fa_sit', 'images/groom_fa_sit.png');
+            this.load.image('groom_mo_sit', 'images/groom_mo_sit.png');
+
+            for (let i = 0; i <= 9; i++) this.load.image(`GM_${i}`, `images/GM_${i}.png`);
+            for (let i = 0; i <= 11; i++) this.load.image(`spinel_${i}`, `images/spinel_${i}.png`);
+            for (let i = 0; i <= 7; i++) this.load.image(`warena_${i}`, `images/warena_${i}.png`);
+            
+            for (let i = 0; i <= 3; i++) this.load.image(`groom_stand1_${i}`, `images/groom_stand1_${i}.png`);
+            for (let i = 0; i <= 3; i++) this.load.image(`bride_stand1_${i}`, `images/bride_stand1_${i}.png`);
+            
+            for (let i = 0; i <= 3; i++) this.load.image(`camera_${i}`, `images/camera_${i}.png`);
+            for (let i = 0; i <= 5; i++) this.load.image(`letter_${i}`, `images/letter_${i}.png`);
+
+            this.load.image('text_spinel', 'images/text_spinel.png');
+            this.load.image('text_warena', 'images/text_warena.png');
+            this.load.image('text_bride_pa', 'images/text_bride_pa.png');
+            this.load.image('text_groom_pa', 'images/text_groom_pa.png');
+            this.load.image('text_camera', 'images/text_camera.png');
+            this.load.image('text_letter', 'images/text_letter.png');
+
+            this.load.image('text_bride_1', 'images/text_bride_1.png');
+            this.load.image('text_bride_2', 'images/text_bride_2.png');
+            this.load.image('text_groom_1', 'images/text_groom_1.png');
+            this.load.image('text_groom_2', 'images/text_groom_2.png');
+            this.load.image('text_GM_1', 'images/text_GM_1.png');
+            this.load.image('text_GM_2', 'images/text_GM_2.png');
+
+            // 💬 NPC 대화창 관련 이미지
+            //  ✅ 새 NPC 추가 시: 여기에 load 한 줄 + chatNpcs 배열에 한 줄 + makeNpcClickable 한 줄
+            this.load.image('chat_page_groom_fa', 'images/chat_page_groom_fa.png'); // 신랑 혼주(아버지+어머니) 공용 대화창
+            this.load.image('chat_page_bride_fa', 'images/chat_page_bride_fa.png'); // 신부 혼주(아버지+어머니) 공용 대화창
+            this.load.image('chat_page_groom',    'images/chat_page_groom.png');    // 신랑 NPC 대화창
+            this.load.image('chat_page_bride',    'images/chat_page_bride.png');    // 신부 NPC 대화창
+            this.load.image('chat_page_warena',   'images/chat_page_warena.png');   // 워레나(계좌번호) NPC 대화창
+            this.load.image('chat_page_spinel',   'images/chat_page_spinel.png');   // 스피넬(예식장 위치) NPC 대화창
+            this.load.image('chat_page_camera',   'images/chat_page_camera.png');   // 카메라(사진 링크) NPC 대화창
+            this.load.image('chat_page_letter',   'images/chat_page_letter.png');   // 우체통(편지 링크) NPC 대화창
+            this.load.image('check_exit', 'images/check_exit.png'); // 대화창 닫기(X) 버튼 (모든 NPC 공용)
+
+            // 👑 운영자(GM) NPC 대화창 이미지 - 메인 메뉴 1장 + 하위 페이지 5장
+            this.load.image('chat_page_GM',   'images/chat_page_GM.png');
+            this.load.image('chat_page_GM_1', 'images/chat_page_GM_1.png');
+            this.load.image('chat_page_GM_2', 'images/chat_page_GM_2.png');
+            this.load.image('chat_page_GM_3', 'images/chat_page_GM_3.png');
+            this.load.image('chat_page_GM_4', 'images/chat_page_GM_4.png');
+            this.load.image('chat_page_GM_5', 'images/chat_page_GM_5.png');
+        }
+
+        create() {
+            this.cameras.main.fadeIn(1000, 0, 0, 0);
+
+            this.add.image(0, 0, 'bg_wedding_village').setOrigin(0, 0).setScale(0.5);
+
+            this.anims.create({ key: 'anim_GM', frames: Array.from({length: 10}, (_, i) => ({ key: `GM_${i}` })), frameRate: 6, repeat: -1 });
+            this.anims.create({ key: 'anim_spinel', frames: Array.from({length: 12}, (_, i) => ({ key: `spinel_${i}` })), frameRate: 6, repeat: -1 });
+            this.anims.create({ key: 'anim_warena', frames: Array.from({length: 8}, (_, i) => ({ key: `warena_${i}` })), frameRate: 6, repeat: -1 });
+            
+            this.anims.create({ key: 'anim_groom', frames: Array.from({length: 4}, (_, i) => ({ key: `groom_stand1_${i}` })), frameRate: 6, repeat: -1 });
+            this.anims.create({ key: 'anim_bride', frames: Array.from({length: 4}, (_, i) => ({ key: `bride_stand1_${i}` })), frameRate: 6, repeat: -1 });
+            
+            this.anims.create({ key: 'anim_camera', frames: Array.from({length: 4}, (_, i) => ({ key: `camera_${i}` })), frameRate: 6, repeat: -1 });
+            this.anims.create({ key: 'anim_letter', frames: Array.from({length: 6}, (_, i) => ({ key: `letter_${i}` })), frameRate: 6, repeat: -1 });
+
+            let npc_bride_fa = this.add.image(1180, 755, 'bride_fa_sit').setOrigin(0.5, 1).setScale(1.5).setDepth(5); 
+            let npc_bride_mo = this.add.image(1100, 755, 'bride_mo_sit').setOrigin(0.5, 1).setScale(1.5).setDepth(5); 
+            let npc_groom_fa = this.add.image(410, 645, 'groom_fa_sit').setOrigin(0.5, 1).setScale(1.5).setDepth(5); 
+            let npc_groom_mo = this.add.image(490, 645, 'groom_mo_sit').setOrigin(0.5, 1).setScale(1.5).setDepth(5); 
+
+            let npc_GM = this.add.sprite(290, 1085, 'GM_0').setOrigin(0.5, 1).setScale(1.5).setDepth(5).play('anim_GM'); 
+            let npc_spinel = this.add.sprite(1450, 1085, 'spinel_0').setOrigin(0.5, 1).setScale(1.5).setDepth(5).play('anim_spinel'); 
+            let npc_warena = this.add.sprite(650, 1085, 'warena_0').setOrigin(0.5, 1).setScale(1.5).setDepth(5).play('anim_warena'); 
+            
+            let npc_groom = this.add.sprite(1075, 490, 'groom_stand1_0').setOrigin(0.5, 1).setScale(1.5).setDepth(5).play('anim_groom');
+            let npc_bride = this.add.sprite(1160, 490, 'bride_stand1_0').setOrigin(0.5, 1).setScale(1.5).setDepth(5).play('anim_bride');
+            
+            let npc_camera = this.add.sprite(850, 1085, 'camera_0').setOrigin(0, 1).setScale(1.5).setDepth(5).setFlipX(true).play('anim_camera'); 
+            let npc_letter = this.add.sprite(2100, 780, 'letter_0').setOrigin(0.5, 1).setScale(1.5).setDepth(5).setFlipX(true).play('anim_letter'); 
+
+            let bubble_spinel = this.add.image(npc_spinel.x - 20, npc_spinel.y - 115, 'text_spinel').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_warena = this.add.image(npc_warena.x + 20, npc_warena.y - 115, 'text_warena').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_bride_pa = this.add.image(npc_bride_fa.x - 50, npc_bride_fa.y - 100, 'text_bride_pa').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_groom_pa = this.add.image(npc_groom_fa.x + 50, npc_groom_fa.y - 100, 'text_groom_pa').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_camera = this.add.image(npc_camera.x + 60, npc_camera.y - 123, 'text_camera').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_letter = this.add.image(npc_letter.x + 20, npc_letter.y - 115, 'text_letter').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+
+            let bubble_bride_1 = this.add.image(npc_bride.x + 20, npc_bride.y - 115, 'text_bride_1').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_bride_2 = this.add.image(npc_bride.x + 20, npc_bride.y - 115, 'text_bride_2').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+
+            let bubble_groom_1 = this.add.image(npc_groom.x - 20, npc_groom.y - 115, 'text_groom_1').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_groom_2 = this.add.image(npc_groom.x - 20, npc_groom.y - 115, 'text_groom_2').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+
+            let bubble_GM_1 = this.add.image(npc_GM.x + 20, npc_GM.y - 115, 'text_GM_1').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+            let bubble_GM_2 = this.add.image(npc_GM.x + 20, npc_GM.y - 115, 'text_GM_2').setOrigin(0.5, 1).setDepth(12).setVisible(false);
+
+            const allBubbles = [
+                bubble_spinel, bubble_warena, bubble_bride_pa, bubble_groom_pa,
+                bubble_bride_1, bubble_bride_2, bubble_groom_1, bubble_groom_2, bubble_GM_1, bubble_GM_2,
+                bubble_camera, bubble_letter
+            ];
+            allBubbles.forEach(bubble => {
+                if (bubble && bubble.texture) {
+                    bubble.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+                }
+            });
+
+            const pattern1Bubbles = [bubble_spinel, bubble_warena, bubble_bride_pa, bubble_groom_pa, bubble_camera, bubble_letter];
+            pattern1Bubbles.forEach(bubble => {
+                let randomDelay = Phaser.Math.Between(0, 3000); 
+                this.time.delayedCall(randomDelay, () => {
+                    bubble.setVisible(true);
+                    this.time.delayedCall(2000, () => bubble.setVisible(false));
+                    this.time.addEvent({
+                        delay: 4000,
+                        loop: true,
+                        callback: () => {
+                            bubble.setVisible(true);
+                            this.time.delayedCall(2000, () => bubble.setVisible(false));
+                        }
+                    });
+                });
+            });
+
+            const setupRelayTimer = (b1, b2) => {
+                let randomDelay = Phaser.Math.Between(0, 3000); 
+                this.time.delayedCall(randomDelay, () => {
+                    b1.setVisible(true);
+                    this.time.delayedCall(2000, () => {
+                        b1.setVisible(false);
+                        this.time.delayedCall(500, () => {
+                            b2.setVisible(true);
+                            this.time.delayedCall(2000, () => b2.setVisible(false));
+                        });
+                    });
+                    this.time.addEvent({
+                        delay: 7500,
+                        loop: true,
+                        callback: () => {
+                            b1.setVisible(true);
+                            this.time.delayedCall(2000, () => {
+                                b1.setVisible(false);
+                                this.time.delayedCall(500, () => {
+                                    b2.setVisible(true);
+                                    this.time.delayedCall(2000, () => b2.setVisible(false));
+                                });
+                            });
+                        }
+                    });
+                });
+            };
+
+            setupRelayTimer(bubble_bride_1, bubble_bride_2);
+            setupRelayTimer(bubble_groom_1, bubble_groom_2);
+            setupRelayTimer(bubble_GM_1, bubble_GM_2);
+
+            this.add.sprite(120, 418, 'portal_0').setOrigin(0.5, 1).setScale(1.5).play('portal_playing');
+
+            this.anims.create({
+                key: 'hiden_portal_playing',
+                frames: Array.from({ length: 5 }, (_, i) => ({ key: `hiden_portal_${i}` })),
+                frameRate: 6,
+                repeat: -1
+            });
+
+            this.add.sprite(645, 655, 'hiden_portal_0').setOrigin(0.5, 1).setScale(1.5).play('hiden_portal_playing');
+            this.add.sprite(1270, 750, 'hiden_portal_0').setOrigin(0.5, 1).setScale(1.3).play('hiden_portal_playing');
+            this.add.sprite(1815, 1095, 'hiden_portal_0').setOrigin(0.5, 1).setScale(1.3).play('hiden_portal_playing');
+            this.add.sprite(175, 1095, 'hiden_portal_0').setOrigin(0.5, 1).setScale(1.5).play('hiden_portal_playing');
+
+            this.physics.world.setBounds(0, 0, 3016, 1130);
+            this.cameras.main.setBounds(0, 0, 3016, 1245);
+            
+            this.player = this.physics.add.sprite(120, 400, `${this.myChar}_stand1_0`).setScale(1.5).setOrigin(0.5, 1).setCollideWorldBounds(true).setBounce(0).setDepth(10);
+            
+            this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+
+            this.anims.create({ key: `${this.myChar}_jump_up`, frames: [{ key: `${this.myChar}_jump_0` }], frameRate: 1 });
+            this.anims.create({ key: `${this.myChar}_jump_peak`, frames: [{ key: `${this.myChar}_jump_1` }], frameRate: 1 });
+            this.anims.create({ key: `${this.myChar}_prone_anim`, frames: [{ key: `${this.myChar}_prone` }], frameRate: 1 });
+            
+            // 💡 계단용 미세 발판 두께 강화 (높이 2 -> 10)
+            let grounds = [
+                this.add.rectangle(3016/2, 1102, 3016, 20, 0x00ff00, 0),    
+                this.add.rectangle(200, 420, 550, 20, 0x00ff00, 0),
+                this.add.rectangle(235, 510, 60, 20, 0x00ff00, 0),
+                this.add.rectangle(235, 620, 60, 20, 0x00ff00, 0),
+                this.add.rectangle(50, 460, 65, 20, 0x00ff00, 0),
+                this.add.rectangle(50, 570, 65, 20, 0x00ff00, 0),
+                this.add.rectangle(530, 655, 390, 20, 0x00ff00, 0),
+                this.add.rectangle(860, 710, 100, 20, 0x00ff00, 0),
+                this.add.rectangle(1150, 770, 350, 20, 0x00ff00, 0),
+                this.add.rectangle(1400, 790, 5, 10, 0x00ff00, 0),
+                this.add.rectangle(1470, 845, 5, 10, 0x00ff00, 0),
+                this.add.rectangle(2063, 895, 1000, 20, 0x00ff00, 0),
+                this.add.rectangle(1950, 850, 650, 20, 0x00ff00, 0),
+                this.add.rectangle(1980, 795, 600, 20, 0x00ff00, 0),
+                this.add.rectangle(1777.5, 1050, 140, 10, 0x00ff00, 0),
+                this.add.rectangle(1822.5, 995, 140, 10, 0x00ff00, 0),
+                this.add.rectangle(1865, 940, 140, 10, 0x00ff00, 0),
+                this.add.rectangle(2350, 1023, 870, 10, 0x00ff00, 0),
+                this.add.rectangle(2398, 972, 595, 10, 0x00ff00, 0),
+                this.add.rectangle(995, 660, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1060, 630, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1100, 580, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1175, 550, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1240, 535, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1300, 505, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1330, 445, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1335, 390, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1325, 335, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1290, 285, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1220, 255, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1145, 270, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1065, 275, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(990, 270, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(930, 310, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(915, 365, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(910, 415, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(940, 465, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(990, 510, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1055, 545, 3, 10, 0x00ff00, 0),
+                this.add.rectangle(1110, 500, 100, 20, 0x00ff00, 0)
+            ];
+
+            this.currentGround = null;
+            this.mainFloorGround = grounds[0]; 
+
+            grounds.forEach(ground => {
+                this.physics.add.existing(ground, true); 
+                ground.body.checkCollision.down = false;  
+                ground.body.checkCollision.left = false;  
+                ground.body.checkCollision.right = false; 
+                this.physics.add.collider(this.player, ground, () => {
+                    this.currentGround = ground; 
+                }); 
+            });
+            
+            this.cursors = this.input.keyboard.createCursorKeys();
+            this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+            this.controls = { left: false, right: false, up: false, down: false, jumpJustPressed: false };
+            this.isJumping = false;
+            this.isTeleporting = false; 
+            this.isPreparingDownJump = false; 
+            
+            // 💡 코요테 타임을 위한 변수
+            this.lastGroundedTime = 0;
+
+            const btnStyle = { font: '30px Arial', fill: '#ffffff', backgroundColor: 'rgba(0,0,0,0.5)', padding: {x: 20, y: 20} };
+            
+            let leftBtn = this.add.image(95, 627, 'arrow_0').setAngle(270).setScale(1.75).setInteractive().setScrollFactor(0).setDepth(9999);
+            leftBtn.on('pointerdown', () => this.controls.left = true).on('pointerup', () => this.controls.left = false).on('pointerout', () => this.controls.left = false);
+            
+            let rightBtn = this.add.image(255, 630, 'arrow_0').setAngle(90).setScale(1.75).setInteractive().setScrollFactor(0).setDepth(9999);
+            rightBtn.on('pointerdown', () => this.controls.right = true).on('pointerup', () => this.controls.right = false).on('pointerout', () => this.controls.right = false);
+
+            let upBtn = this.add.image(177, 548, 'arrow_0').setAngle(0).setScale(1.75).setInteractive().setScrollFactor(0).setDepth(9999);
+            upBtn.on('pointerdown', () => this.controls.up = true).on('pointerup', () => this.controls.up = false).on('pointerout', () => this.controls.up = false);
+
+            let downBtn = this.add.image(173, 630, 'arrow_0').setAngle(180).setScale(1.75).setInteractive().setScrollFactor(0).setDepth(9999);
+            downBtn.on('pointerdown', () => this.controls.down = true).on('pointerup', () => this.controls.down = false).on('pointerout', () => this.controls.down = false);
+
+            let jumpBtn = this.add.image(1100, 630, 'jump_key').setScale(0.3).setInteractive().setScrollFactor(0).setDepth(9999);
+            jumpBtn.on('pointerdown', () => this.controls.jumpJustPressed = true).on('pointerup', () => this.controls.jumpJustPressed = false).on('pointerout', () => this.controls.jumpJustPressed = false);
+
+            let npcBtn = this.add.image(1200, 630, 'npc_key').setScale(0.3).setInteractive().setScrollFactor(0).setDepth(9999);
+            // 💬 NPC 버튼: 누르는 즉시(누르고 있는 동안 X) "근처에 있는 NPC와 대화 시도"를 실행한다.
+            npcBtn.on('pointerdown', () => this.tryOpenNearestChat());
+
+            let soundBtn = this.add.image(1200, 50, this.isSoundOn ? 'sound_on' : 'sound_off').setInteractive({ useHandCursor: true }).setScale(0.1).setScrollFactor(0).setDepth(9999);
+
+            let bgm = null;
+
+            if (this.cache.audio.exists('bgm_wedding_village')) {
+                bgm = this.sound.add('bgm_wedding_village', { loop: true, volume: 0 });
+                if (this.isSoundOn) {
+                    bgm.play();
+                    this.tweens.add({ targets: bgm, volume: 0.5, duration: 1000 });
+                }
+            }
+
+            soundBtn.on('pointerdown', (pointer, localX, localY, event) => {
+                if (event) event.stopPropagation();
+                if (!bgm) return; 
+
+                if (bgm.isPlaying && bgm.volume > 0) {
+                    bgm.pause(); 
+                    soundBtn.setTexture('sound_off'); 
+                    this.isSoundOn = false;
+                } else {
+                    if (bgm.isPaused) bgm.resume();
+                    else bgm.play();
+                    bgm.volume = 0.5;
+                    soundBtn.setTexture('sound_on'); 
+                    this.isSoundOn = true;
+                }
+            });
+
+            // =================================================================
+            // 💬 NPC 대화 시스템
+            //  - this.chatNpcs 배열에 "대화 가능한 NPC" 정보를 등록해두면, NPC버튼을 누르거나
+            //    NPC를 직접 클릭(터치)했을 때 가까운 NPC와의 대화창이 자동으로 열립니다.
+            //
+            //  ✅ 새 NPC에게 "이미지 1장짜리" 단순 대화 기능을 추가하고 싶다면 딱 3단계만 하면 됩니다:
+            //    1) preload()에 그 NPC의 대화창 이미지를 load
+            //    2) 아래 this.chatNpcs 배열에 한 줄 추가
+            //       예) { npc: npc_bride_fa, chatImageKey: 'chat_page_bride_fa' },
+            //    3) makeNpcClickable(그 NPC); 한 줄 추가 (NPC 직접 클릭도 가능하게 하려면)
+            //
+            //  ✅ "메뉴 선택 → 다른 대화창으로 전환" 같은 NPC(예: 운영자 GM)는 buildExtras에서
+            //    클릭 가능한 텍스트를 만들고, 그 텍스트의 클릭 핸들러 안에서 this.setChatPage(...)를
+            //    호출해 다른 이미지로 바꿔주면 됩니다. (아래 GM 설정 참고)
+            // =================================================================
+
+            // =================================================================
+            // 💰 워레나(축의금 계좌번호 안내) 설정
+            //  - ACCOUNTS: 측별 이름과 계좌번호. 번호만 바꾸고 싶으면 여기 숫자만 수정하세요.
+            //  - WARENA_TEXT_LAYOUT: 각 줄이 화면에 표시될 좌표(x, y). ACCOUNTS와 같은 순서로
+            //    1:1 대응됩니다. 지금은 대화창 중앙(640, 360)을 기준으로 세로로 살짝 펼쳐뒀어요.
+            //    원하는 위치로 자유롭게 옮기세요 (전부 같은 좌표로 둬도 됩니다).
+            // =================================================================
+            const ACCOUNTS = [
+                { label: '신랑 이승원',      number: 'IBK기업 010-26293856' },
+                { label: '신부 이유진',      number: '신한 110-479-904-716' },
+                { label: '신랑 혼주 이효근', number: '하나 220-043-96100108' },
+                { label: '신랑 혼주 유금순', number: '신한 110-317-873019' },
+                { label: '신부 혼주 이동수', number: '우체국 102459-02-059840' },
+                { label: '신부 혼주 심순옥', number: 'KB국민 244-24-0091-251' },
+            ];
+
+            // ACCOUNTS 배열과 순서가 1:1로 맞아야 합니다 (1번째 좌표 = 1번째 계좌, ...)
+            const WARENA_TEXT_LAYOUT = [
+                { x: 633, y: 320 },
+                { x: 627, y: 355 },
+                { x: 662, y: 390 },
+                { x: 647, y: 425 },
+                { x: 671, y: 460 },
+                { x: 667, y: 495 },
+            ];
+
+            // 대화창을 열 때 호출되어, 계좌번호 텍스트들을 만들어 반환한다.
+            // (반환된 텍스트들은 closeChat() 시점에 자동으로 전부 제거됨)
+            this.buildWarenaAccounts = () => {
+                return ACCOUNTS.map((account, i) => {
+                    const pos = WARENA_TEXT_LAYOUT[i];
+                    const text = this.add.text(pos.x, pos.y, `${account.label} : ${account.number}`, {
+                        font: '25px Arial',
+                        fill: '#000000',
+                        backgroundColor: 'rgba(255,255,255,0.6)',
+                        padding: { x: 6, y: 3 },
+                    })
+                        .setOrigin(0.5, 0.5)     // 좌표의 중심을 기준으로 텍스트가 놓이도록
+                        .setScrollFactor(0)        // 화면에 고정 (대화창과 같은 방식)
+                        .setDepth(20002)           // 대화창 이미지(20000)보다 위에 보이도록
+                        .setInteractive({ useHandCursor: true });
+
+                    // 클릭하면 계좌번호를 클립보드에 복사하고, 0.8초간 "복사완료!"로 표시해 피드백을 준다
+                    text.on('pointerdown', () => {
+                        navigator.clipboard.writeText(account.number).then(() => {
+                            text.setText('복사완료!');
+                            this.time.delayedCall(800, () => text.setText(`${account.label} : ${account.number}`));
+                        }).catch(() => {
+                            console.warn('클립보드 복사 실패: 브라우저가 지원하지 않거나 권한이 없습니다.');
+                        });
+                    });
+
+                    return text;
+                });
+            };
+
+            // =================================================================
+            // 🔗 링크형 NPC 공용 헬퍼
+            //  - 스피넬, 카메라, 우체통처럼 "클릭하면 새 탭에서 링크가 열리는" NPC들이
+            //    모두 이 함수 하나를 재사용합니다. buildExtras에서 호출하기만 하면 됩니다.
+            // =================================================================
+            this.buildLinkExtra = (x, y, url) => {
+                const text = this.add.text(x, y, url, {
+                    font: '30px Arial',
+                    fill: '#0033cc',
+                    backgroundColor: 'rgba(255,255,255,0.6)',
+                    padding: { x: 6, y: 3 },
+                }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(20002).setInteractive({ useHandCursor: true });
+                text.on('pointerdown', () => window.open(url, '_blank'));
+                return [text];
+            };
+
+            // =================================================================
+            // 📍 스피넬(예식장 위치 안내) 설정
+            //  - WEDDING_HALL_MAP_URL: 클릭 시 열릴 지도 링크. 네이버지도/카카오맵 등 실제 링크로 바꾸세요.
+            //  - SPINEL_TEXT_LAYOUT: 링크 텍스트가 표시될 좌표(x, y). 자유롭게 옮기세요.
+            // =================================================================
+            const WEDDING_HALL_MAP_URL = 'https://buly.kr/DwGSojz'; // ⚠️ 실제 예식장 지도 링크로 교체하세요
+            const SPINEL_TEXT_LAYOUT = { x: 850, y: 400 };
+
+            // 대화창을 열 때 호출되어, 클릭 가능한 지도 링크 텍스트를 만들어 반환한다.
+            this.buildSpinelMapLink = () => this.buildLinkExtra(SPINEL_TEXT_LAYOUT.x, SPINEL_TEXT_LAYOUT.y, WEDDING_HALL_MAP_URL);
+
+            // =================================================================
+            // 📷 카메라(웨딩 사진) NPC / 📬 우체통(편지) NPC 설정
+            //  - 각각 링크를 열어주는 단순 버튼형 NPC입니다 (스피넬과 동일한 방식).
+            //  - 링크 주소나 텍스트 위치(x, y)를 바꾸고 싶으면 아래 상수만 수정하세요.
+            // =================================================================
+            const CAMERA_LINK_URL = 'https://www.naver.com/';          // ⚠️ 실제 웨딩 사진 링크로 교체하세요
+            const CAMERA_TEXT_LAYOUT = { x: 880, y: 372 };
+            const LETTER_LINK_URL = 'https://buly.kr/CWwRsFn';          // 우체통(편지/방명록) 링크
+            const LETTER_TEXT_LAYOUT = { x: 915, y: 372 };
+
+            this.buildCameraLink = () => this.buildLinkExtra(CAMERA_TEXT_LAYOUT.x, CAMERA_TEXT_LAYOUT.y, CAMERA_LINK_URL);
+            this.buildLetterLink = () => this.buildLinkExtra(LETTER_TEXT_LAYOUT.x, LETTER_TEXT_LAYOUT.y, LETTER_LINK_URL);
+
+            // =================================================================
+            // 👑 운영자(GM) 메뉴 설정 (기존과 동일)
+            // =================================================================
+            //  - GM_MENU_ITEMS: 메뉴에 보일 텍스트와, 클릭했을 때 전환할 대화창 이미지 키.
+            //    순서를 바꾸거나 문구를 바꾸고 싶으면 label만 수정하면 됩니다.
+            //  - GM_MENU_TEXT_LAYOUT: 각 줄의 좌표(x, y). GM_MENU_ITEMS와 1:1로 대응됩니다.
+            //    요청하신 대로 "왼쪽 정렬"이 되도록, 아래 buildGMMenu에서 텍스트 기준점을
+            //    setOrigin(0, 0.5)로 설정했습니다 → 그래서 같은 x값을 쓰면 왼쪽 줄이 자동으로 맞춰집니다.
+            // =================================================================
+            const GM_MENU_ITEMS = [
+                { label: '1. 신랑, 신부, 혼주', pageKey: 'chat_page_GM_1' },
+                { label: '2. 축의 정보',        pageKey: 'chat_page_GM_2' },
+                { label: '3. 결혼식장 위치',     pageKey: 'chat_page_GM_3' },
+                { label: '4. 웨딩 촬영 사진',     pageKey: 'chat_page_GM_4' },
+                { label: '5. 우체통',            pageKey: 'chat_page_GM_5' },
+            ];
+
+            // GM_MENU_ITEMS와 순서가 1:1로 맞아야 합니다 (1번째 좌표 = 1번째 메뉴, ...)
+            // 모든 줄의 x값을 같게 두면 왼쪽 줄이 자동으로 맞춰집니다 (왼쪽 정렬).
+            const GM_MENU_TEXT_LAYOUT = [
+                { x: 430, y: 310 },
+                { x: 430, y: 350 },
+                { x: 430, y: 390 },
+                { x: 430, y: 430 },
+                { x: 430, y: 470 },
+            ];
+
+            // GM의 메인 메뉴(대화창을 열었을 때 보이는 선택 텍스트들)를 만들어 반환한다.
+            // 각 텍스트를 클릭하면 this.setChatPage(...)로 그 메뉴에 해당하는 대화창 이미지로 바뀐다.
+            this.buildGMMenu = () => {
+                return GM_MENU_ITEMS.map((item, i) => {
+                    const pos = GM_MENU_TEXT_LAYOUT[i];
+                    const text = this.add.text(pos.x, pos.y, item.label, {
+                        font: '26px Arial',
+                        fill: '#000000',
+                        backgroundColor: 'rgba(255,255,255,0.6)',
+                        padding: { x: 6, y: 3 },
+                    })
+                        .setOrigin(0, 0.5)        // 💡 왼쪽 기준 정렬 (x좌표가 텍스트의 "왼쪽 끝"이 됨)
+                        .setScrollFactor(0)
+                        .setDepth(20002)
+                        .setInteractive({ useHandCursor: true });
+
+                    // 메뉴 텍스트를 클릭하면, 해당하는 하위 대화창 이미지로 전환한다 (추가 요소는 없음 → 빈 배열)
+                    text.on('pointerdown', () => {
+                        this.setChatPage(item.pageKey, []);
+                    });
+
+                    return text;
+                });
+            };
+
+            // =================================================================
+            // 💬 대화 가능한 NPC 목록 (총 9명)
+            //  ✅ 새 NPC 추가 시: 이 목록에 한 줄 + makeNpcClickable 한 줄만 추가하면 됩니다.
+            //
+            //  형식:
+            //   { npc: NPC객체, chatImageKey: '대화창이미지키' }              ← 이미지 1장짜리 단순 대화창
+            //   { npc: NPC객체, chatImageKey: '대화창이미지키',
+            //     buildExtras: () => this.빌더함수() }                        ← 추가 요소(텍스트/링크 등)가 있는 대화창
+            // =================================================================
+            this.chatNpcs = [
+                // 혼주석 NPC (신랑 혼주 2명은 같은 이미지 공유, 신부 혼주 2명도 같은 이미지 공유)
+                { npc: npc_groom_fa, chatImageKey: 'chat_page_groom_fa' }, // 신랑 아버지
+                { npc: npc_groom_mo, chatImageKey: 'chat_page_groom_fa' }, // 신랑 어머니 (같은 이미지 공유)
+                { npc: npc_bride_fa, chatImageKey: 'chat_page_bride_fa' }, // 신부 아버지
+                { npc: npc_bride_mo, chatImageKey: 'chat_page_bride_fa' }, // 신부 어머니 (같은 이미지 공유)
+                // 신랑 신부 NPC
+                { npc: npc_groom, chatImageKey: 'chat_page_groom' }, // 신랑
+                { npc: npc_bride, chatImageKey: 'chat_page_bride' }, // 신부
+                // 기능형 NPC (텍스트/링크 추가 요소 포함)
+                { npc: npc_warena, chatImageKey: 'chat_page_warena', buildExtras: () => this.buildWarenaAccounts() },
+                { npc: npc_spinel, chatImageKey: 'chat_page_spinel', buildExtras: () => this.buildSpinelMapLink() },
+                { npc: npc_camera, chatImageKey: 'chat_page_camera', buildExtras: () => this.buildCameraLink() },
+                { npc: npc_letter, chatImageKey: 'chat_page_letter', buildExtras: () => this.buildLetterLink() },
+                { npc: npc_GM,     chatImageKey: 'chat_page_GM',     buildExtras: () => this.buildGMMenu() },
+            ];
+
+            // NPC 상하좌우 기준 80 이내에 플레이어가 있는지 확인 (원형 거리가 아니라 x/y축 각각 비교)
+            const NPC_INTERACT_RANGE = 80;
+            const isNearNpc = (npc) => {
+                return Math.abs(this.player.x - npc.x) <= NPC_INTERACT_RANGE &&
+                       Math.abs(this.player.y - npc.y) <= NPC_INTERACT_RANGE;
+            };
+
+            // 대화창(팝업) 이미지 + 닫기(X) 버튼은 미리 1세트만 만들어두고, 대화할 때마다
+            // 텍스처(이미지)만 바꿔 끼워서 재사용한다 (NPC마다 새로 만들지 않음)
+            const CHAT_POPUP_SCALE = 0.4; // 모든 NPC 대화창 크기 배수 - 여기 숫자만 바꾸면 전체 반영됨
+            
+            this.chatPopupImage = this.add.image(640, 360, 'chat_page_groom_fa')
+                .setScale(CHAT_POPUP_SCALE).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(20000).setVisible(false);
+
+            this.chatExitButton = this.add.image(0, 0, 'check_exit')
+                .setOrigin(0.7, 0).setScrollFactor(0).setDepth(20001)
+                .setInteractive({ useHandCursor: true }).setScale(1.5).setVisible(false);
+            this.chatExitButton.on('pointerdown', () => this.closeChat());
+
+            // 현재 열려있는 대화의 추가 요소들(텍스트, 링크 등)을 보관 → 닫힐 때 전부 destroy
+            this.chatExtraObjects = [];
+
+            // =================================================================
+            // 🔄 대화창 "페이지 전환" 공용 함수
+            //  - imageKey: 새로 보여줄 대화창 이미지
+            //  - newExtras: 그 페이지에 올라갈 추가 요소들. 없으면 빈 배열 []
+            //  - GM처럼 "메뉴 선택 → 다른 이미지로 전환"하는 NPC는 메뉴 텍스트의 클릭 핸들러 안에서
+            //    이 함수를 호출하면 됩니다 (buildGMMenu 참고).
+            // =================================================================
+
+            this.setChatPage = (imageKey, newExtras = []) => {
+                // 이전 페이지에 있던 추가 요소들을 전부 제거
+                this.chatExtraObjects.forEach(obj => obj.destroy());
+
+                this.chatPopupImage.setTexture(imageKey).setPosition(640, 360).setVisible(true);
+
+                // 닫기 버튼을 "대화창 이미지의 가장 오른쪽 위"로 자동 배치 (이미지가 바뀌어도 항상 재계산)
+                const popupRightEdge = this.chatPopupImage.x + this.chatPopupImage.displayWidth / 2;
+                const popupTopEdge = this.chatPopupImage.y - this.chatPopupImage.displayHeight / 2;
+                this.chatExitButton.setPosition(popupRightEdge, popupTopEdge).setVisible(true);
+
+                this.chatExtraObjects = newExtras;
+            };
+
+            // NPC와의 대화창을 연다 (entry: this.chatNpcs 배열의 항목 하나)
+            this.openChat = (entry) => {
+                this.isChatOpen = true; // 대화 중에는 캐릭터 이동/점프를 막는다 (update()에서 이 플래그를 체크함)
+
+                this.setChatPage(entry.chatImageKey, entry.buildExtras ? entry.buildExtras() : []);
+
+                this.player.setVelocityX(0); // 대화 시작 시 캐릭터를 제자리에 멈춰 세움
+            };
+
+            // 대화창을 닫고 원래 웨딩빌리지 화면으로 되돌린다
+            this.closeChat = () => {
+                this.isChatOpen = false;
+                this.chatPopupImage.setVisible(false);
+                this.chatExitButton.setVisible(false);
+
+                // 떠있던 추가 요소(계좌번호 텍스트, 메뉴 텍스트 등)들을 전부 제거
+                this.chatExtraObjects.forEach(obj => obj.destroy());
+                this.chatExtraObjects = [];
+            };
+
+            // "근처에 있는 NPC" 중 한 명과의 대화를 시도한다 (NPC버튼을 눌렀을 때 호출)
+            this.tryOpenNearestChat = () => {
+                if (this.isChatOpen) return; // 이미 대화 중이면 무시
+                const target = this.chatNpcs.find(entry => isNearNpc(entry.npc));
+                if (target) this.openChat(target);
+            };
+
+            // NPC를 직접 클릭(터치)했을 때도 대화가 열리도록 만들어주는 함수.
+            // 단, 멀리서 클릭하면 무시되고 "가까이 있을 때만" 열린다.
+            const makeNpcClickable = (npc) => {
+                npc.setInteractive({ useHandCursor: true });
+                npc.on('pointerdown', () => {
+                    if (this.isChatOpen) return;
+                    const entry = this.chatNpcs.find(e => e.npc === npc);
+                    if (entry && isNearNpc(npc)) this.openChat(entry);
+                });
+            };
+
+            // ✅ 클릭(터치)으로 대화 가능하게 설정 (새 NPC 추가 시 여기에 한 줄씩 추가)
+            [npc_groom_fa, npc_groom_mo, npc_bride_fa, npc_bride_mo,
+             npc_groom, npc_bride,
+             npc_warena, npc_spinel, npc_camera, npc_letter, npc_GM
+            ].forEach(makeNpcClickable);
+
+            // 🖥️ 웨딩빌리지 인게임 내 전체화면 버튼 (사운드 버튼 옆)
+            //  - SelectScene과 동일: 검정 아이콘, 43px
+            this.add.text(1100, 30, '⛶', { font: '43px Arial', fill: '#000000' })
+                .setInteractive({ useHandCursor: true })
+                .setScrollFactor(0).setDepth(9999)
+                .on('pointerdown', () => enterLandscapeExperience(this.scale));
+
+            this.coordText = this.add.text(0, 0, '(0, 0)', {
+                font: '30px Arial',
+                fill: '#ffff00', 
+                backgroundColor: 'rgba(0,0,0,0.7)', 
+                padding: { x: 5, y: 5 }
+            }).setDepth(9999);
+        }
+
+        update() {
+            let pointer = this.input.activePointer;
+            this.coordText.setPosition(pointer.worldX + 15, pointer.worldY + 15);
+            this.coordText.setText(`(${Math.round(pointer.worldX)}, ${Math.round(pointer.worldY)})`);
+
+            // 💬 대화창이 열려있는 동안은 캐릭터 이동/점프를 전부 멈춘다 (대화에만 집중)
+            if (this.isChatOpen) {
+                Phaser.Input.Keyboard.JustDown(this.spaceKey); // 대화 중 눌린 점프 입력은 버려서, 대화 종료 직후 점프가 튀어나가지 않게 함
+                this.player.setVelocityX(0);
+                return;
+            }
+
+            let moveLeft = this.controls.left || this.cursors.left.isDown;
+            let moveRight = this.controls.right || this.cursors.right.isDown;
+            let moveUp = this.controls.up || this.cursors.up.isDown;
+            let moveDown = this.controls.down || this.cursors.down.isDown;
+            let jumpPressed = Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.controls.jumpJustPressed;
+            
+            this.controls.jumpJustPressed = false;
+
+            // 💡 코요테 타임 (0.1초의 여유) 적용: 물리 엔진 떨림 무시
+            if (this.player.body.blocked.down) {
+                this.isJumping = false;
+                this.lastGroundedTime = this.time.now;
+            }
+
+            // 바닥에 닿은 지 100ms(0.1초) 이내이고 점프 중이 아니라면 바닥에 있는 것으로 인정
+            let isGrounded = (this.time.now - this.lastGroundedTime) <= 100 && !this.isJumping;
+
+            if (!isGrounded) {
+                this.currentGround = null; // 완전히 공중에 떠있을 때만 바닥 초기화
+            }
+
+            if (this.isPreparingDownJump) {
+                this.player.setVelocityX(0);
+                this.player.anims.play(`${this.myChar}_prone_anim`, true);
+                return;
+            }
+
+            if (moveLeft && !moveDown) { 
+                this.player.setVelocityX(-198).setFlipX(false); 
+            } else if (moveRight && !moveDown) { 
+                this.player.setVelocityX(198).setFlipX(true); 
+            } else { 
+                this.player.setVelocityX(0); 
+            }
+
+            // 💡 물리엔진 변수 대신 새로 만든 여유 변수(isGrounded)로 점프 가능 판별
+            if (jumpPressed && isGrounded) {
+                if (moveDown) {
+                    // 아래키와 점프키가 동시에 눌렸을 때만 아래로 통과
+                    if (this.currentGround && this.currentGround !== this.mainFloorGround) {
+                        this.isPreparingDownJump = true;
+                        this.player.setVelocityX(0);
+                        this.player.anims.play(`${this.myChar}_prone_anim`, true);
+                        this.time.delayedCall(500, () => {
+                            this.isPreparingDownJump = false;
+                            let target = this.currentGround;
+                            if (target) target.body.checkCollision.up = false;
+                            this.player.setVelocityY(150);
+                            this.time.delayedCall(400, () => { if (target) target.body.checkCollision.up = true; });
+                        });
+                    }
+                } else {
+                    // 일반 점프
+                    this.player.setVelocityY(-550); // 중력 900에 최적화된 점프값
+                    this.sound.play('bgm_jump');
+                    this.isJumping = true;
+                    this.lastGroundedTime = 0;
+                }
+            }
+
+            if (moveUp && !this.isTeleporting) {
+                if (Phaser.Math.Distance.Between(this.player.x, this.player.y, 120, 418) < 50) {
+                    this.isTeleporting = true;
+                    this.sound.play('bgm_portal'); 
+                    this.cameras.main.fadeOut(1000, 0, 0, 0);
+                    this.cameras.main.once('camerafadeoutcomplete', () => {
+                        this.game.sound.stopAll(); 
+                        this.scene.start('SelectScene');
+                    });
+                }
+                else if (Phaser.Math.Distance.Between(this.player.x, this.player.y, 645, 655) < 50) {
+                    this.executeTeleport(175, 1095);
+                }
+                else if (Phaser.Math.Distance.Between(this.player.x, this.player.y, 175, 1095) < 50) {
+                    this.executeTeleport(645, 655);
+                }
+                else if (Phaser.Math.Distance.Between(this.player.x, this.player.y, 1270, 750) < 50) {
+                    this.executeTeleport(1815, 1095);
+                }
+                else if (Phaser.Math.Distance.Between(this.player.x, this.player.y, 1815, 1095) < 50) {
+                    this.executeTeleport(1270, 750);
+                }
+            }
+
+            // 💡 애니메이션 출력도 isGrounded 변수를 기반으로 판별
+            if (!isGrounded) {
+                if (Math.abs(this.player.body.velocity.y) < 50) { 
+                    this.player.anims.play(`${this.myChar}_jump_peak`, true); 
+                } else { 
+                    this.player.anims.play(`${this.myChar}_jump_up`, true); 
+                }
+            } else {
+                if (moveDown) {
+                    this.player.anims.play(`${this.myChar}_prone_anim`, true);
+                } else if (moveLeft || moveRight) { 
+                    this.player.anims.play(`${this.myChar}_walking`, true); 
+                } else { 
+                    this.player.anims.play(`${this.myChar}_breathing`, true); 
+                }
+            }
+        }
+
+        executeTeleport(targetX, targetY) {
+            this.isTeleporting = true; 
+            this.sound.play('bgm_tel'); 
+            
+            this.player.setVelocityY(0); 
+            this.player.setPosition(targetX, targetY - 10); 
+            
+            this.time.delayedCall(300, () => { this.isTeleporting = false; });
+        }
+    }
+
+    const config = { 
+        type: Phaser.AUTO, 
+        width: 1280, 
+        height: 720, 
+        parent: 'game-container', 
+        render: { 
+            pixelArt: true,
+            roundPixels: true 
+        },
+        physics: { 
+            default: 'arcade', 
+            arcade: { 
+                gravity: { y: 1200 }
+                // 💡 roundPixels: true 옵션을 제거하여 1픽셀 오차 진동 현상 방지
+            } 
+        }, 
+        input: {
+            activePointers: 3 
+        },
+        scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }, 
+        scene: [StartScene, SelectScene, VillageScene] 
+    };
+    new Phaser.Game(config);
+</script>
+</body>
+</html>
